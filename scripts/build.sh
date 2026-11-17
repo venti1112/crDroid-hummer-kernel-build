@@ -9,7 +9,7 @@ KERNEL_SUFFIX="${KERNEL_SUFFIX:-}"
 
 echo "下载并配置 Clang"
 mkdir -p "$CLANG_DIR"
-curl -fsSL --retry 5 "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/29182889399818f97baa65ea238c80e8117981eb/clang-r596125.tar.gz" | tar -xz -C "$CLANG_DIR"
+curl -fL --retry 5 "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/29182889399818f97baa65ea238c80e8117981eb/clang-r596125.tar.gz" | tar -xz -C "$CLANG_DIR"
 export PATH="$CLANG_DIR/bin:$PATH"
 
 echo "克隆内核源码"
