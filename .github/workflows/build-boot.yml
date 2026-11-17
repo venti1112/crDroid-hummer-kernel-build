@@ -1,0 +1,48 @@
+name: 构建 boot.img
+
+on:
+  workflow_dispatch:
+    inputs:
+      suffix:
+        description: '自定义内核尾缀'
+        default: ''
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: 构建 boot.img
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v7
+
+      - name: 安装编译依赖
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bc bison flex libssl-dev libelf-dev libncurses-dev dwarves python3 perl cpio xz-utils zstd lz4 device-tree-compiler git curl
+
+      - name: 拉取源码、打补丁并编译
+        id: build
+        run: bash scripts/build.sh
+        env:
+          KERNEL_SUFFIX: ${{ inputs.suffix }}
+
+      - name: 输出版本信息到运行摘要
+        run: |
+          {
+            echo "### KERNELRELEASE"
+            echo '`${{ steps.build.outputs.kernel_release }}`'
+            echo ""
+            echo "### 安全补丁级别"
+            echo '`${{ steps.build.outputs.os_patch_level }}`'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传 boot.img
+        uses: actions/upload-artifact@v7
+        with:
+          name: boot-${{ steps.build.outputs.kernel_release || 'img' }}
+          path: boot.img
+          compression-level: 0
+          if-no-files-found: error
