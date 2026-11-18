@@ -75,7 +75,14 @@ jobs:
         shell: bash
         run: |
           wget -O "$RUNNER_TEMP/hummer-build/droidspaces.patch" "https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/main/Documentation/resources/kernel-patches/GKI/below-kernel-6.12/001.GKI-below-6.12-fix_sysvipc_kabi_6_7_8.patch"
-          patch -p1 < "$RUNNER_TEMP/hummer-build/droidspaces.patch"
+          patch -p1 --no-backup-if-mismatch < "$RUNNER_TEMP/hummer-build/droidspaces.patch"
+
+      - name: 打 BBRv3 补丁
+        working-directory: ${{ runner.temp }}/hummer-build/sm8750
+        shell: bash
+        run: |
+          wget -O "$RUNNER_TEMP/hummer-build/bbr3.patch" "https://raw.githubusercontent.com/WildKernels/kernel_patches/main/common/bbrv3/0001-net-tcp-backport-BBRv3-to-android15-6.6.patch"
+          patch -p1 --no-backup-if-mismatch < "$RUNNER_TEMP/hummer-build/bbr3.patch"
 
       - name: 集成 Baseband-guard
         working-directory: ${{ runner.temp }}/hummer-build/sm8750
@@ -102,6 +109,9 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_PATH=y
           CONFIG_BBG=y
           CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,selinux,smack,tomoyo,apparmor,bpf,baseband_guard"
+          CONFIG_TCP_CONG_BBR3=y
+          CONFIG_DEFAULT_BBR3=y
+          CONFIG_DEFAULT_CUBIC=n
           CONFIG_SYSVIPC=y
           CONFIG_POSIX_MQUEUE=y
           CONFIG_IPC_NS=y
