@@ -108,11 +108,6 @@ jobs:
           wget -O "$RUNNER_TEMP/hummer-build/unicode_fix.patch" "$KP/common/unicode_bypass_fix_6.1+.patch"
           patch -p1 --no-backup-if-mismatch < "$RUNNER_TEMP/hummer-build/unicode_fix.patch"
 
-      # - name: 集成 Baseband-guard
-      #   working-directory: ${{ runner.temp }}/hummer-build/sm8750
-      #   shell: bash
-      #   run: wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
-
       - name: 配置内核选项
         shell: bash
         run: |
@@ -131,8 +126,6 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_MAP=y
           CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER=y
           CONFIG_KSU_SUSFS_SUS_PATH=y
-          # CONFIG_BBG=y
-          # CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,selinux,smack,tomoyo,apparmor,bpf,baseband_guard"
           CONFIG_TCP_CONG_BBR3=y
           CONFIG_DEFAULT_BBR3=y
           CONFIG_DEFAULT_CUBIC=n
