@@ -1,0 +1,254 @@
+name: 构建无 BBG boot.img
+
+on:
+  workflow_dispatch:
+    inputs:
+      suffix:
+        description: '自定义内核尾缀'
+        default: ''
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  KERNEL_REPO: https://github.com/crdroidandroid/android_kernel_oneplus_sm8750
+  CLANG_URL: https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/29182889399818f97baa65ea238c80e8117981eb/clang-r596125.tar.gz
+  SUSFS_URL: https://gitlab.com/simonpunk/susfs4ksu/-/raw/gki-android15-6.6/kernel_patches
+  KP: https://raw.githubusercontent.com/WildKernels/kernel_patches/main
+  KERNEL_SUFFIX: ${{ inputs.suffix }}
+
+jobs:
+  build:
+    name: 构建 boot.img
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v7
+
+      - name: 安装依赖
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bc bison flex libssl-dev libelf-dev libncurses-dev dwarves python3 perl cpio xz-utils zstd lz4 device-tree-compiler git curl wget gawk
+
+      - name: 缓存 Clang
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/clang-r596125
+          key: clang-r596125
+
+      - name: 下载并配置 Clang
+        shell: bash
+        run: |
+          if ! "$RUNNER_TEMP/clang-r596125/bin/clang" --version >/dev/null 2>&1; then
+              rm -rf "$RUNNER_TEMP/clang-r596125"
+              mkdir -p "$RUNNER_TEMP/clang-r596125"
+              wget -O- "$CLANG_URL" | tar -xz -C "$RUNNER_TEMP/clang-r596125"
+          fi
+          "$RUNNER_TEMP/clang-r596125/bin/clang" --version
+          echo "$RUNNER_TEMP/clang-r596125/bin" >> "$GITHUB_PATH"
+
+      - name: 克隆内核源码
+        shell: bash
+        run: |
+          rm -rf "$RUNNER_TEMP/hummer-build"
+          mkdir -p "$RUNNER_TEMP/hummer-build"
+          git clone --depth=1 -b 17.0 "$KERNEL_REPO" "$RUNNER_TEMP/hummer-build/sm8750"
+          git clone --depth=1 -b 17.0 "$KERNEL_REPO-modules" "$RUNNER_TEMP/hummer-build/sm8750-modules"
+
+      - name: 集成 SukiSU
+        working-directory: ${{ runner.temp }}/hummer-build/sm8750
+        shell: bash
+        run: curl -fsSL "https://git.zako.shirkneko.top:20004/shirkneko/SukiSU/raw/branch/main/kernel/setup.sh" | bash -s builtin-new
+
+      - name: 集成 SUSFS
+        working-directory: ${{ runner.temp }}/hummer-build/sm8750
+        shell: bash
+        run: |
+          wget -O "$RUNNER_TEMP/hummer-build/susfs.patch" "$SUSFS_URL/50_add_susfs_in_gki-android15-6.6.patch"
+          git apply "$RUNNER_TEMP/hummer-build/susfs.patch"
+          wget -O fs/susfs.c "$SUSFS_URL/fs/susfs.c"
+          wget -O include/linux/susfs.h "$SUSFS_URL/include/linux/susfs.h"
+          wget -O include/linux/susfs_def.h "$SUSFS_URL/include/linux/susfs_def.h"
+
+      - name: 打 Droidspaces 补丁
+        working-directory: ${{ runner.temp }}/hummer-build/sm8750
+        shell: bash
+        run: |
+          wget -O "$RUNNER_TEMP/hummer-build/droidspaces.patch" "https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/main/Documentation/resources/kernel-patches/GKI/below-kernel-6.12/001.GKI-below-6.12-fix_sysvipc_kabi_6_7_8.patch"
+          patch -p1 --no-backup-if-mismatch < "$RUNNER_TEMP/hummer-build/droidspaces.patch"
+
+      - name: 打 BBRv3 补丁
+        working-directory: ${{ runner.temp }}/hummer-build/sm8750
+        shell: bash
+        run: |
+          wget -O "$RUNNER_TEMP/hummer-build/bbr3.patch" "$KP/common/bbrv3/0001-net-tcp-backport-BBRv3-to-android15-6.6.patch"
+          patch -p1 --no-backup-if-mismatch < "$RUNNER_TEMP/hummer-build/bbr3.patch"
+
+      - name: 集成 NTSync
+        working-directory: ${{ runner.temp }}/hummer-build/sm8750
+        shell: bash
+        run: |
+          wget -O "$RUNNER_TEMP/hummer-build/ntsync_base.patch" "$KP/common/ntsync/ntsync_base.patch"
+          wget -O "$RUNNER_TEMP/hummer-build/ntsync_compat.patch" "$KP/common/ntsync/ntsync_compat_android15-6.6.patch"
+          patch -p1 --no-backup-if-mismatch < "$RUNNER_TEMP/hummer-build/ntsync_base.patch"
+          patch -p1 --no-backup-if-mismatch < "$RUNNER_TEMP/hummer-build/ntsync_compat.patch"
+
+      - name: 打 socket 缓冲补丁
+        working-directory: ${{ runner.temp }}/hummer-build/sm8750
+        shell: bash
+        run: |
+          wget -O "$RUNNER_TEMP/hummer-build/sk_mem.patch" "$KP/common/increase_sk_mem_packets.patch"
+          patch -p1 --no-backup-if-mismatch < "$RUNNER_TEMP/hummer-build/sk_mem.patch"
+
+      - name: 打 unicode 绕过补丁
+        working-directory: ${{ runner.temp }}/hummer-build/sm8750
+        shell: bash
+        run: |
+          wget -O "$RUNNER_TEMP/hummer-build/unicode_fix.patch" "$KP/common/unicode_bypass_fix_6.1+.patch"
+          patch -p1 --no-backup-if-mismatch < "$RUNNER_TEMP/hummer-build/unicode_fix.patch"
+
+      # - name: 集成 Baseband-guard
+      #   working-directory: ${{ runner.temp }}/hummer-build/sm8750
+      #   shell: bash
+      #   run: wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
+
+      - name: 配置内核选项
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/hummer-build/ci.config" <<'EOF'
+          CONFIG_KSU=y
+          CONFIG_KPM=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_INLINE_HOOK=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          CONFIG_KSU_SUSFS_SUS_MAP=y
+          CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          # CONFIG_BBG=y
+          # CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,selinux,smack,tomoyo,apparmor,bpf,baseband_guard"
+          CONFIG_TCP_CONG_BBR3=y
+          CONFIG_DEFAULT_BBR3=y
+          CONFIG_DEFAULT_CUBIC=n
+          CONFIG_NTSYNC=y
+          CONFIG_SYSVIPC=y
+          CONFIG_POSIX_MQUEUE=y
+          CONFIG_IPC_NS=y
+          CONFIG_PID_NS=y
+          CONFIG_DEVTMPFS=y
+          CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
+          CONFIG_USER_NS=y
+          CONFIG_IP6_NF_NAT=y
+          CONFIG_IP6_NF_TARGET_MASQUERADE=y
+          CONFIG_MACVLAN=y
+          CONFIG_IP_NF_TARGET_REJECT=y
+          CONFIG_IP6_NF_TARGET_REJECT=y
+          CONFIG_NETFILTER_XT_TARGET_LOG=y
+          CONFIG_NETFILTER_XT_MATCH_RECENT=y
+          CONFIG_IP_SET=y
+          CONFIG_IP_SET_MAX=65534
+          CONFIG_IP_SET_BITMAP_IP=y
+          CONFIG_IP_SET_BITMAP_IPMAC=y
+          CONFIG_IP_SET_BITMAP_PORT=y
+          CONFIG_IP_SET_HASH_IP=y
+          CONFIG_IP_SET_HASH_IPMARK=y
+          CONFIG_IP_SET_HASH_IPPORT=y
+          CONFIG_IP_SET_HASH_IPPORTIP=y
+          CONFIG_IP_SET_HASH_IPPORTNET=y
+          CONFIG_IP_SET_HASH_IPMAC=y
+          CONFIG_IP_SET_HASH_MAC=y
+          CONFIG_IP_SET_HASH_NET=y
+          CONFIG_IP_SET_HASH_NETNET=y
+          CONFIG_IP_SET_HASH_NETPORT=y
+          CONFIG_IP_SET_HASH_NETPORTNET=y
+          CONFIG_IP_SET_HASH_NETIFACE=y
+          CONFIG_IP_SET_LIST_SET=y
+          CONFIG_NETFILTER_XT_SET=y
+          CONFIG_BPF_STREAM_PARSER=y
+          CONFIG_IP_NF_TARGET_ECN=y
+          CONFIG_IP_NF_TARGET_TTL=y
+          CONFIG_IP6_NF_TARGET_HL=y
+          CONFIG_IP6_NF_MATCH_HL=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          CONFIG_TMPFS_XATTR=y
+          EOF
+
+      - name: 合并内核选项
+        working-directory: ${{ runner.temp }}/hummer-build/sm8750
+        shell: bash
+        run: |
+          make O=out ARCH=arm64 LLVM=1 gki_defconfig
+          scripts/kconfig/merge_config.sh -m -O out out/.config arch/arm64/configs/vendor/sun_perf.config
+          make O=out ARCH=arm64 LLVM=1 olddefconfig
+          scripts/kconfig/merge_config.sh -m -O out out/.config arch/arm64/configs/vendor/oplus/sun_perf.config
+          make O=out ARCH=arm64 LLVM=1 olddefconfig
+          scripts/kconfig/merge_config.sh -m -O out out/.config "$RUNNER_TEMP/hummer-build/ci.config"
+          make O=out ARCH=arm64 LLVM=1 olddefconfig
+
+      - name: 拼 KERNELRELEASE
+        id: version
+        working-directory: ${{ runner.temp }}/hummer-build/sm8750
+        shell: bash
+        run: |
+          KERNEL_VERSION="$(make -s kernelversion 2>/dev/null)"
+          KERNEL_ANDROID="$(sed -nE 's/^BRANCH=([^-]+)-.*/\1/p' build.config.common)"
+          KMI_GENERATION="$(sed -nE 's/^KMI_GENERATION=//p' build.config.common)"
+          KERNEL_SHA="$(git rev-parse --short=12 HEAD)"
+          KERNEL_LOCALVERSION="$(sed -nE 's/^CONFIG_LOCALVERSION="(.*)"$/\1/p' out/.config)"
+          KERNEL_RELEASE="${KERNEL_VERSION}-${KERNEL_ANDROID}-${KMI_GENERATION}-g${KERNEL_SHA}${KERNEL_LOCALVERSION}"
+          if [ -n "$KERNEL_SUFFIX" ]; then
+              KERNEL_RELEASE="${KERNEL_RELEASE}-${KERNEL_SUFFIX}"
+          fi
+          OS_PATCH_LEVEL="$(date -u -d "@$(git log -1 --format=%ct)" +%Y-%m)"
+          echo "  KERNELRELEASE  = $KERNEL_RELEASE"
+          echo "  OS_PATCH_LEVEL = $OS_PATCH_LEVEL"
+          echo "kernel_release=$KERNEL_RELEASE" >> "$GITHUB_OUTPUT"
+          echo "os_patch_level=$OS_PATCH_LEVEL" >> "$GITHUB_OUTPUT"
+
+      - name: 编译
+        working-directory: ${{ runner.temp }}/hummer-build/sm8750
+        shell: bash
+        env:
+          KERNEL_RELEASE: ${{ steps.version.outputs.kernel_release }}
+        run: |
+          rm -f out/include/config/kernel.release
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 KERNELRELEASE="$KERNEL_RELEASE" -j"$(nproc)" Image
+
+      - name: 打包 boot.img
+        working-directory: ${{ runner.temp }}/hummer-build/sm8750
+        shell: bash
+        env:
+          OS_PATCH_LEVEL: ${{ steps.version.outputs.os_patch_level }}
+        run: |
+          : > "$RUNNER_TEMP/hummer-build/ramdisk"
+          python3 "$GITHUB_WORKSPACE/tools/mkbootimg.py" \
+              --kernel out/arch/arm64/boot/Image --ramdisk "$RUNNER_TEMP/hummer-build/ramdisk" \
+              --header_version 4 --pagesize 4096 \
+              --os_version 17.0.0 --os_patch_level "$OS_PATCH_LEVEL" --cmdline '' \
+              -o "$GITHUB_WORKSPACE/boot.img"
+          truncate -s 96M "$GITHUB_WORKSPACE/boot.img"
+
+      - name: 输出版本信息到运行摘要
+        shell: bash
+        run: |
+          {
+            echo "### KERNELRELEASE"
+            echo '`${{ steps.version.outputs.kernel_release }}`'
+            echo ""
+            echo "### 安全补丁级别"
+            echo '`${{ steps.version.outputs.os_patch_level }}`'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传 boot.img
+        uses: actions/upload-artifact@v7
+        with:
+          name: boot-${{ steps.version.outputs.kernel_release || 'img' }}
+          path: boot.img
+          compression-level: 0
+          if-no-files-found: error
