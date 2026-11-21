@@ -59,7 +59,7 @@ jobs:
       - name: 集成 SukiSU
         working-directory: ${{ runner.temp }}/hummer-build/sm8750
         shell: bash
-        run: curl -fsSL "https://raw.githubusercontent.com/SukiSU-Nova/SukiSU-Nova/main/kernel/setup.sh" | bash -s builtin-new
+        run: curl -fsSL "https://git.zako.shirkneko.top:20004/shirkneko/SukiSU/raw/branch/main/kernel/setup.sh" | bash -s builtin-new
 
       - name: 集成 SUSFS
         working-directory: ${{ runner.temp }}/hummer-build/sm8750
